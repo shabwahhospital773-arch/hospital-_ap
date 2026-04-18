@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>هيئة مستشفى شبوة العام - نظام الحجز</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        :root { --blue: #0056b3; --light-blue: #e3f2fd; --white: #ffffff; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--light-blue); margin: 0; padding: 20px; }
+        .container { max-width: 500px; margin: auto; background: var(--white); border-radius: 15px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); overflow: hidden; }
+        header { background: var(--blue); color: white; padding: 20px; text-align: center; }
+        .content { padding: 20px; }
+        h1 { margin: 0; font-size: 1.5rem; }
+        .info-text { color: #555; font-size: 0.9rem; margin-bottom: 20px; text-align: center; }
+        
+        label { display: block; margin: 10px 0 5px; font-weight: bold; text-align: right; }
+        input, select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 1rem; text-align: right; }
+        
+        .btn { width: 100%; padding: 15px; border: none; border-radius: 8px; font-size: 1.1rem; font-weight: bold; cursor: pointer; transition: 0.3s; margin-top: 15px; }
+        .btn-primary { background: var(--blue); color: white; }
+        .btn-admin { background: #6c757d; color: white; margin-top: 30px; font-size: 0.9rem; }
+        
+        #result, #adminPanel { border-top: 2px dashed var(--blue); margin-top: 20px; padding-top: 20px; }
+        #qrcode { display: flex; justify-content: center; margin: 20px 0; }
+        .note { background: #fff3cd; padding: 10px; border-radius: 5px; font-size: 0.85rem; color: #856404; margin-top: 15px; line-height: 1.6; }
+        .hidden { display: none; }
+        .admin-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.8rem; }
+        .admin-table th, .admin-table td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>هيئة مستشفى شبوة العام</h1>
+        <p>مرحباً بكم.. احجز موعدك بسهولة</p>
+    </header>
+
+    <div class="content">
+        <div id="bookingSection">
+            <p class="info-text">نظام حجز المواعيد بالعيادات الخارجية</p>
+            
+            <form id="bookingForm">
+                <label>اسم المريض الرباعي:</label>
+                <input type="text" id="fullName" placeholder="يجب إدخال 4 أسماء على الأقل" required>
+
+                <label>رقم الهاتف اليمني:</label>
+                <input type="tel" id="phone" placeholder="7xxxxxxxx" pattern="[7][0-9]{8}" required title="يرجى إدخال رقم هاتف يمني صحيح يبدأ بـ 7">
+
+                <label>عمر المريض:</label>
+                <input type="number" id="age" min="13" placeholder="يجب أن يكون العمر 13 سنة فأكثر" required>
+
+                <label>اختر العيادة:</label>
+                <select id="clinicSelect" required></select>
+
+                <button type="submit" class="btn btn-primary">تأكيد الحجز وتوليد QR</button>
+            </form>
+
+            <div class="note">
+                <strong>ملاحظة هامة:</strong><br>
+                على المريض الحضور للمستشفى لتأكيد الحجز من الساعة 6:00 صباحاً إلى 9:00 صباحاً. بعد الساعة 9:00 صباحاً يتم إلغاء الحجز تلقائياً.
+            </div>
+        </div>
+
+        <div id="result" class="hidden">
+            <h3 style="text-align:center; color: #28a745;">تم تأكيد حجزك بنجاح ✅</h3>
+            <div id="qrcode"></div>
+            <div id="ticketDetails" style="background: #f9f9f9; padding: 15px; border-radius: 8px; line-height: 1.8;"></div>
+            <button onclick="window.print()" class="btn" style="background:#28a745; color:white;">طباعة التذكرة</button>
+            <button onclick="location.reload()" class="btn" style="background:#eee;">عودة</button>
+        </div>
+
+        <button id="toggleAdmin" class="btn btn-admin">لوحة الإدارة ⚙️</button>
+        
+        <div id="adminPanel" class="hidden">
+            <h3>إدارة العيادات والمسجلين</h3>
+            <div id="adminControls"></div>
+            <hr>
+            <h4>قائمة المسجلين اليوم:</h4>
+            <div id="patientsList"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // بيانات العيادات الافتراضية
+    let clinics = [
+        { name: "عيادة الباطنية", max: 40, current: 0, status: "open" },
+        { name: "عيادة المسالك البولية", max: 35, current: 0, status: "open" },
+        { name: "عيادة العظام", max: 40, current: 0, status: "open" },
+        { name: "عيادة العيون", max: 35, current: 0, status: "open" },
+        { name: "عيادة العمود الفقري", max: 15, current: 0, status: "open" },
+        { name: "عيادة الجراحة", max: 25, current: 0, status: "open" },
+        { name: "عيادة الأنف والأذن والحنجرة", max: 35, current: 0, status: "open" }
+    ];
+
+    let registeredPatients = [];
+
+    // تحديث القائمة المنسدلة
+    function updateClinicSelect() {
+        const select = document.getElementById('clinicSelect');
+        select.innerHTML = '<option value="" disabled selected>-- اختر العيادة --</option>';
+        clinics.forEach(c => {
+            if(c.status === "open" && c.current < c.max) {
+                select.innerHTML += `<option value="${c.name}">${c.name} (المتاح: ${c.max - c.current})</option>`;
+            }
+        });
+    }
+
+    // التحقق من الاسم الرباعي
+    function isQuadName(name) {
+        return name.trim().split(/\s+/).length >= 4;
+    }
+
+    document.getElementById('bookingForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const name = document.getElementById('fullName').value;
+        const phone = document.getElementById('phone').value;
+        const age = document.getElementById('age').value;
+        const clinicName = document.getElementById('clinicSelect').value;
+        const today = new Date().toLocaleDateString();
+
+        // 1. فحص تكرار الاسم في نفس اليوم
+        const isDuplicate = registeredPatients.some(p => p.name === name && p.date === today);
+        if (isDuplicate) {
+            alert("عذراً، لا يمكن حجز نفس المريض مرتين في يوم واحد.");
+            return;
+        }
+
+        // 2. فحص الاسم الرباعي
+        if (!isQuadName(name)) {
+            alert("يرجى إدخال الاسم رباعياً على الأقل.");
+            return;
+        }
+
+        // 3. تحديث العدد في العيادة
+        const clinicIndex = clinics.findIndex(c => c.name === clinicName);
+        clinics[clinicIndex].current++;
+
+        // 4. حفظ المريض
+        const pData = { name, phone, clinic: clinicName, date: today, time: new Date().toLocaleTimeString('ar-YE') };
+        registeredPatients.push(pData);
+
+        // 5. توليد QR وعرض النتيجة
+        document.getElementById('bookingSection').classList.add('hidden');
+        document.getElementById('result').classList.remove('hidden');
+        
+        const qrContent = `مستشفى شبوة\nالمريض: ${name}\nالعيادة: ${clinicName}\nالتاريخ: ${today}`;
+        document.getElementById('qrcode').innerHTML = "";
+        new QRCode(document.getElementById('qrcode'), { text: qrContent, width: 160, height: 160 });
+        
+        document.getElementById('ticketDetails').innerHTML = `
+            <strong>الاسم:</strong> ${name}<br>
+            <strong>الهاتف:</strong> ${phone}<br>
+            <strong>العيادة:</strong> ${clinicName}<br>
+            <strong>التاريخ:</strong> ${today}
+        `;
+    });
+
+    // لوحة الإدارة
+    document.getElementById('toggleAdmin').addEventListener('click', function() {
+        const panel = document.getElementById('adminPanel');
+        panel.classList.toggle('hidden');
+        renderAdmin();
+    });
+
+    function renderAdmin() {
+        const controls = document.getElementById('adminControls');
+        controls.innerHTML = "";
+        clinics.forEach((c, index) => {
+            controls.innerHTML += `
+                <div style="margin-bottom:10px; border-bottom:1px solid #eee; padding-bottom:5px;">
+                    <strong>${c.name}</strong><br>
+                    العدد الأقصى: <input type="number" value="${c.max}" style="width:60px; padding:5px;" onchange="clinics[${index}].max=this.value">
+                    الحالة: <button onclick="toggleClinic(${index})">${c.status === 'open' ? 'إغلاق' : 'فتح'}</button>
+                </div>
+            `;
+        });
+
+        const list = document.getElementById('patientsList');
+        if(registeredPatients.length === 0) {
+            list.innerHTML = "<p>لا يوجد مسجلين حتى الآن.</p>";
+        } else {
+            let table = `<table class="admin-table"><tr><th>الاسم</th><th>العيادة</th><th>الوقت</th><th>تأكيد</th></tr>`;
+            registeredPatients.forEach(p => {
+                table += `<tr><td>${p.name}</td><td>${p.clinic}</td><td>${p.time}</td><td><button onclick="alert('تم التأكيد')">تأكيد</button></td></tr>`;
+            });
+            table += `</table>`;
+            list.innerHTML = table;
+        }
+    }
+
+    function toggleClinic(index) {
+        clinics[index].status = clinics[index].status === 'open' ? 'closed' : 'open';
+        renderAdmin();
+        updateClinicSelect();
+    }
+
+    // البداية
+    updateClinicSelect();
+</script>
+
+</body>
+</html>
